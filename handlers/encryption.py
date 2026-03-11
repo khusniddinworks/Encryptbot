@@ -421,77 +421,113 @@ def process_decryption_final(message, zip_path, extract_dir, password):
     if os.path.exists(rec_path):
         with open(rec_path, 'r') as f:
             locked_id = int(base64.b64decode(f.read().strip()).decode())
+    # Signature Check
+    sig_path = os.path.join(extract_dir, "signature.txt")
+    if os.path.exists(sig_path):
+        with open(sig_path, 'r') as f:
+            sig_b64 = f.read().strip()
+            # Handle if it's already decoded or still b64
+            try: sig = base64.b64decode(sig_b64).decode()
+            except: sig = sig_b64
+            
+            if sig != BOT_SECRET: raise ValueError("Invalid Bot Signature! This file was not encrypted by this bot version.")
+    
+    # Recipient Check
+    rec_path = os.path.join(extract_dir, "recipient.txt")
+    if os.path.exists(rec_path):
+        with open(rec_path, 'r') as f:
+            rec_b64 = f.read().strip()
+            try: locked_id = int(base64.b64decode(rec_b64).decode())
+            except: locked_id = int(rec_b64)
+            
             if locked_id != message.from_user.id:
                 raise ValueError(f"⛔️ Access Denied! This file is locked to user ID: {locked_id}. You cannot open it.")
 
     algo_file = os.path.join(extract_dir, "algo.txt")
     if os.path.exists(algo_file):
-        with open(algo_file, 'r') as f: algo = f.read().strip()
+        with open(algo_file, 'r') as f:
+            algo_b64 = f.read().strip()
+            try: algo = base64.b64decode(algo_b64).decode()
+            except: algo = algo_b64
     else: algo = "AES"
 
     enc_file = None
     for name in os.listdir(extract_dir):
         if name.endswith(".enc"): enc_file = os.path.join(extract_dir, name); break
-    if not enc_file: raise ValueError("No encrypted data found in ZIP.")
+    if not enc_file: raise ValueError("No encrypted data found (data.enc missing).")
     
     filename_file = os.path.join(extract_dir, "filename.txt")
     orig_name = "decrypted.file"
     if os.path.exists(filename_file):
         try:
             with open(filename_file, 'r') as f:
-                orig_name = base64.b64decode(f.read().strip()).decode()
+                fn_b64 = f.read().strip()
+                try: orig_name = base64.b64decode(fn_b64).decode()
+                except: orig_name = fn_b64
         except: pass
 
     decrypted_data = None
     
+    def read_b64_file(path):
+        with open(path, 'r') as f:
+            content = f.read().strip()
+            try: return base64.b64decode(content)
+            except: return content.encode() # fallback
+
     if "AES" in algo:
-        with open(os.path.join(extract_dir, "salt.txt"),'r') as f: salt = base64.b64decode(f.read())
-        with open(os.path.join(extract_dir, "pnonce.txt"),'r') as f: pnonce = base64.b64decode(f.read())
-        with open(os.path.join(extract_dir, "ptag.txt"),'r') as f: ptag = base64.b64decode(f.read())
-        with open(os.path.join(extract_dir, "key.txt"),'r') as f: enc_key = base64.b64decode(f.read())
+        salt = read_b64_file(os.path.join(extract_dir, "salt.txt"))
+        pnonce = read_b64_file(os.path.join(extract_dir, "pnonce.txt"))
+        ptag = read_b64_file(os.path.join(extract_dir, "ptag.txt"))
+        enc_key = read_b64_file(os.path.join(extract_dir, "key.txt"))
         
         aes_key = crypto_utils.decrypt_data_with_password(salt, pnonce, enc_key, ptag, password)
         
-        with open(os.path.join(extract_dir, "nonce.txt"),'r') as f: nonce = base64.b64decode(f.read())
-        with open(os.path.join(extract_dir, "tag.txt"),'r') as f: tag = base64.b64decode(f.read())
+        nonce = read_b64_file(os.path.join(extract_dir, "nonce.txt"))
+        tag = read_b64_file(os.path.join(extract_dir, "tag.txt"))
         enc_data = file_manager.read_file(enc_file)
         decrypted_data = aes_cipher.decrypt_aes(nonce, enc_data, tag, aes_key)
         
     elif "RSA" in algo:
-        with open(os.path.join(extract_dir, "salt.txt"),'r') as f: salt = base64.b64decode(f.read())
-        with open(os.path.join(extract_dir, "pnonce.txt"),'r') as f: pnonce = base64.b64decode(f.read())
-        with open(os.path.join(extract_dir, "ptag.txt"),'r') as f: ptag = base64.b64decode(f.read())
-        with open(os.path.join(extract_dir, "enc_priv.txt"),'r') as f: enc_p = base64.b64decode(f.read())
+        salt = read_b64_file(os.path.join(extract_dir, "salt.txt"))
+        pnonce = read_b64_file(os.path.join(extract_dir, "pnonce.txt"))
+        ptag = read_b64_file(os.path.join(extract_dir, "ptag.txt"))
+        enc_p = read_b64_file(os.path.join(extract_dir, "enc_priv.txt"))
         
         priv_pem_bytes = crypto_utils.decrypt_data_with_password(salt, pnonce, enc_p, ptag, password)
 
         from cryptography.hazmat.backends import default_backend; from cryptography.hazmat.primitives import serialization
         priv = serialization.load_pem_private_key(priv_pem_bytes, password=None, backend=default_backend())
 
-        with open(os.path.join(extract_dir,"key.txt"),'r') as f: enc_aes = base64.b64decode(f.read())
-        with open(os.path.join(extract_dir,"nonce.txt"),'r') as f: nonce = base64.b64decode(f.read())
-        with open(os.path.join(extract_dir,"tag.txt"),'r') as f: tag = base64.b64decode(f.read())
+        enc_aes = read_b64_file(os.path.join(extract_dir,"key.txt"))
+        nonce = read_b64_file(os.path.join(extract_dir,"nonce.txt"))
+        tag = read_b64_file(os.path.join(extract_dir,"tag.txt"))
         
         aes_key = rsa_cipher.decrypt_rsa(enc_aes, priv)
         enc_data = file_manager.read_file(enc_file)
         decrypted_data = aes_cipher.decrypt_aes(nonce, enc_data, tag, aes_key)
         
     elif "ECC" in algo:
-        with open(os.path.join(extract_dir, "salt.txt"),'r') as f: salt = base64.b64decode(f.read())
-        with open(os.path.join(extract_dir, "pnonce.txt"),'r') as f: pnonce = base64.b64decode(f.read())
-        with open(os.path.join(extract_dir, "ptag.txt"),'r') as f: ptag = base64.b64decode(f.read())
-        with open(os.path.join(extract_dir, "enc_priv.txt"),'r') as f: enc_p = base64.b64decode(f.read())
+        salt = read_b64_file(os.path.join(extract_dir, "salt.txt"))
+        pnonce = read_b64_file(os.path.join(extract_dir, "pnonce.txt"))
+        ptag = read_b64_file(os.path.join(extract_dir, "ptag.txt"))
+        enc_p = read_b64_file(os.path.join(extract_dir, "enc_priv.txt"))
         
         priv_pem_bytes = crypto_utils.decrypt_data_with_password(salt, pnonce, enc_p, ptag, password)
         
         from cryptography.hazmat.backends import default_backend; from cryptography.hazmat.primitives import serialization
         priv = serialization.load_pem_private_key(priv_pem_bytes, password=None, backend=default_backend())
         
-        with open(os.path.join(extract_dir,"key.txt"),'r') as f: enc_aes_tag = base64.b64decode(f.read())
-        with open(os.path.join(extract_dir,"key_nonce.txt"),'r') as f: key_nonce = base64.b64decode(f.read())
-        with open(os.path.join(extract_dir,"file_nonce.txt"),'r') as f: file_nonce = base64.b64decode(f.read())
-        with open(os.path.join(extract_dir,"file_tag.txt"),'r') as f: file_tag = base64.b64decode(f.read())
-        with open(os.path.join(extract_dir,"ephem_pub.txt"),'rb') as f: ephem_pub_bytes = base64.b64decode(f.read())
+        enc_aes_tag = read_b64_file(os.path.join(extract_dir,"key.txt"))
+        key_nonce = read_b64_file(os.path.join(extract_dir,"key_nonce.txt"))
+        file_nonce = read_b64_file(os.path.join(extract_dir,"file_nonce.txt"))
+        file_tag = read_b64_file(os.path.join(extract_dir,"file_tag.txt"))
+        
+        # Public key might be stored as PEM string or B64 of PEM
+        ep_path = os.path.join(extract_dir,"ephem_pub.txt")
+        with open(ep_path, 'r') as f:
+            ep_content = f.read().strip()
+            try: ephem_pub_bytes = base64.b64decode(ep_content)
+            except: ephem_pub_bytes = ep_content.encode()
         
         aes_key = ecc_cipher.decrypt_ecc_hybrid(enc_aes_tag, key_nonce, ephem_pub_bytes, priv)
         enc_data = file_manager.read_file(enc_file)
@@ -499,4 +535,4 @@ def process_decryption_final(message, zip_path, extract_dir, password):
     
     out_path = os.path.join(extract_dir, orig_name)
     with open(out_path, 'wb') as f: f.write(decrypted_data)
-    with open(out_path, 'rb') as f: bot.send_document(message.chat.id, f, caption="🔓 Decrypted!")
+    with open(out_path, 'rb') as f: bot.send_document(message.chat.id, f, caption="🔓 Deshifrlangan fayl!")

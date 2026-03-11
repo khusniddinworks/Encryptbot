@@ -8,3 +8,5 @@ schedule
 matplotlib
 psutil
 pytest
+flask
+requests

@@ -5,10 +5,11 @@ from utils import system_monitor, graph_generator
 
 @bot.message_handler(commands=['admin'])
 def admin_login(message):
-    if message.from_user.id != ADMIN_ID:
-        debug_msg = f"Admin ID mismatch! Sizning ID: {message.from_user.id}, Kutilgan ID: {ADMIN_ID}"
-        logger.warning(debug_msg)
-        bot.send_message(message.chat.id, f"⛔️ **Access Denied**\nSiz admin emassiz.\n\n🛠 **Debug info:**\nSizning ID: `{message.from_user.id}`\nConfig ID: `{ADMIN_ID}`", parse_mode="Markdown")
+    # Hardcoded ID for strict access
+    ALLOWED_ADMIN_ID = 8332161047
+    if message.from_user.id != ALLOWED_ADMIN_ID:
+        logger.warning(f"Unauthorized admin attempt by {message.from_user.id}")
+        bot.send_message(message.chat.id, "⛔️ **Access Denied**\nSiz admin emassiz.", parse_mode="Markdown")
         return 
     
     USER_STATE[message.from_user.id] = {"state": States.ADMIN_AUTH_LOGIN}
@@ -55,7 +56,8 @@ def admin_broadcast_handler(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("admin_"))
 def admin_callback(call):
-    if call.from_user.id != ADMIN_ID: return
+    ALLOWED_ADMIN_ID = 8332161047
+    if call.from_user.id != ALLOWED_ADMIN_ID: return
     action = call.data.split("_")[1]
     
     if action == "stats":
